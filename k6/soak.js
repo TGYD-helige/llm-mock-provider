@@ -15,6 +15,18 @@ const API_KEY = __ENV.API_KEY || 'dummy-key';
 const MODEL = __ENV.MODEL || 'mock-gpt';
 const QUERY = __ENV.QUERY || '';
 
+function jsonField(res, field) {
+  if (res.status !== 200 || !res.body) {
+    return undefined;
+  }
+
+  try {
+    return res.json(field);
+  } catch (_) {
+    return undefined;
+  }
+}
+
 export default function () {
   const body = JSON.stringify({
     model: MODEL,
@@ -32,7 +44,7 @@ export default function () {
 
   check(res, {
     'status is 200': (r) => r.status === 200,
-    'has usage': (r) => r.json('usage') !== undefined,
+    'has usage': (r) => jsonField(r, 'usage') !== undefined,
   });
 
   sleep(1);

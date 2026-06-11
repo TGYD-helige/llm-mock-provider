@@ -35,8 +35,8 @@ export default function () {
 
   check(res, {
     'status is 200': (r) => r.status === 200,
-    'contains data': (r) => r.body && r.body.includes('data:'),
-    'contains DONE': (r) => r.body && r.body.includes('[DONE]'),
+    'contains data': (r) => r.status === 200 && r.body && r.body.includes('data:'),
+    'contains DONE': (r) => r.status === 200 && r.body && r.body.includes('[DONE]'),
   });
 
   sleep(1);
