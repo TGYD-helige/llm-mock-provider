@@ -1,22 +1,35 @@
 # llm-mock-provider
 
-这是一个用于模拟 OpenAI-compatible 大模型服务的 mock provider 工程，并配套 k6 脚本用于压测 new-api 大模型网关。它包含：
+`llm-mock-provider` is an OpenAI-compatible mock provider for testing LLM gateways, API routers, billing layers, retry logic, streaming behavior, and observability pipelines without calling a real model provider.
 
-- OpenAI-compatible `mock-provider`
-- k6 压测脚本
-- docker compose 启动配置
-- new-api mock 渠道接入说明
-- pprof / Pyroscope 性能分析配置说明
-
-压测链路：
+It can be used as a lightweight upstream for any OpenAI-compatible gateway:
 
 ```text
-k6 -> new-api -> mock-openai-provider
+k6 / client / gateway test runner
+  -> your LLM gateway
+  -> llm-mock-provider
 ```
 
-也可以先让 k6 直连 `mock-provider` 验证 mock 服务行为。
+You can also call `llm-mock-provider` directly when validating mock behavior.
 
-## 项目结构
+## Security
+
+This is a public project. Do not commit real API keys, cloud credentials, kubeconfigs, tokens, production URLs, or private deployment values.
+
+The examples use placeholder values such as `dummy-key`, `localhost`, and `mock-gpt`. Replace them only in your private deployment environment or secret manager.
+
+## Features
+
+- OpenAI-compatible chat completions endpoint
+- OpenAI-compatible embeddings endpoint
+- Non-streaming and SSE streaming responses
+- Configurable latency, TTFT, chunk delay, token counts, error rates, and timeout simulation
+- k6 scripts for smoke, load, streaming, stress, and soak tests
+- Docker and docker compose support
+- No OpenAI SDK dependency
+- Go standard library HTTP server, no Gin/Echo/Fiber
+
+## Project Structure
 
 ```text
 llm-mock-provider/
@@ -35,32 +48,30 @@ llm-mock-provider/
 └── README.md
 ```
 
-Kubernetes 部署入口已经合入 `new-api-saas/deploy/helm/new-api-saas`。本仓库只保留 mock provider 本身和本地/k6 压测资产。
+Kubernetes manifests are intentionally not included here because deployment topology is gateway-specific. Keep cluster credentials and production values in a private infrastructure repository.
 
-## 快速启动
+## Quick Start
 
 ```bash
 docker compose up --build
 ```
 
-启动后 mock provider 监听：
+The mock provider listens on:
 
 ```text
 http://localhost:3001
 ```
 
-验证：
+Verify:
 
 ```bash
-curl -s http://localhost:3001/healthz
-curl -s http://localhost:3001/v1/models
+curl -sS http://localhost:3001/healthz
+curl -sS http://localhost:3001/v1/models
 ```
 
-## mock-provider 接口
+## API
 
 ### `GET /healthz`
-
-返回：
 
 ```json
 {"status":"ok"}
@@ -68,49 +79,51 @@ curl -s http://localhost:3001/v1/models
 
 ### `GET /v1/models`
 
-返回模型名来自 `DEFAULT_MODEL`，默认是 `mock-gpt`。
+The model name comes from `DEFAULT_MODEL`; the default is `mock-gpt`.
 
 ### `POST /v1/chat/completions`
 
-支持 `stream=false` 和 `stream=true`。
+Supports both `stream=false` and `stream=true`.
 
-非流式示例：
+Non-streaming:
 
 ```bash
-curl -s http://localhost:3001/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"mock-gpt","messages":[{"role":"user","content":"hello"}],"stream":false}'
+curl --request POST \
+  --url 'http://localhost:3001/v1/chat/completions' \
+  --header 'Content-Type: application/json' \
+  --data '{"model":"mock-gpt","messages":[{"role":"user","content":"hello"}],"stream":false}'
 ```
 
-流式示例：
+Streaming:
 
 ```bash
-curl -N 'http://localhost:3001/v1/chat/completions?ttft_ms=300&chunk_delay_ms=50&completion_tokens=10' \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"mock-gpt","messages":[{"role":"user","content":"hello"}],"stream":true}'
+curl --no-buffer --request POST \
+  --url 'http://localhost:3001/v1/chat/completions?ttft_ms=300&chunk_delay_ms=50&completion_tokens=10' \
+  --header 'Content-Type: application/json' \
+  --data '{"model":"mock-gpt","messages":[{"role":"user","content":"hello"}],"stream":true}'
 ```
 
 ### `POST /v1/embeddings`
 
-返回 OpenAI-compatible 格式的固定 embedding，不调用真实模型。
+Returns a fixed OpenAI-compatible embedding response. It does not call a real model.
 
-## Mock 控制参数
+## Mock Controls
 
-这些参数通过 query string 控制：
+Control behavior with query parameters:
 
-| 参数 | 说明 | 示例 |
+| Parameter | Description | Example |
 | --- | --- | --- |
-| `delay_ms` | 非流式整体延迟 | `delay_ms=1000` |
-| `ttft_ms` | 流式首 token 延迟 | `ttft_ms=300` |
-| `chunk_delay_ms` | 流式 chunk 间隔 | `chunk_delay_ms=50` |
-| `prompt_tokens` | 模拟输入 token | `prompt_tokens=100` |
-| `completion_tokens` | 模拟输出 token；流式模式下控制 content chunk 数 | `completion_tokens=200` |
-| `error_rate` | 随机错误概率 | `error_rate=0.05` |
-| `error_status` | 错误状态码，默认 `500` | `error_status=429` |
-| `timeout_rate` | 随机超时概率 | `timeout_rate=0.01` |
-| `timeout_ms` | 超时等待时间，默认 `30000` | `timeout_ms=30000` |
+| `delay_ms` | Whole-response delay for non-streaming requests | `delay_ms=1000` |
+| `ttft_ms` | Time to first token for streaming requests | `ttft_ms=300` |
+| `chunk_delay_ms` | Delay between streaming chunks | `chunk_delay_ms=50` |
+| `prompt_tokens` | Simulated input tokens | `prompt_tokens=100` |
+| `completion_tokens` | Simulated output tokens; also controls streaming content chunk count | `completion_tokens=200` |
+| `error_rate` | Random error probability, from `0` to `1` | `error_rate=0.05` |
+| `error_status` | Error status code, default `500` | `error_status=429` |
+| `timeout_rate` | Random timeout probability, from `0` to `1` | `timeout_rate=0.01` |
+| `timeout_ms` | Timeout sleep duration, default `30000` | `timeout_ms=30000` |
 
-示例：
+Examples:
 
 ```text
 /v1/chat/completions?delay_ms=1000
@@ -119,7 +132,7 @@ curl -N 'http://localhost:3001/v1/chat/completions?ttft_ms=300&chunk_delay_ms=50
 /v1/chat/completions?timeout_rate=0.01&timeout_ms=30000
 ```
 
-错误响应格式：
+Error response:
 
 ```json
 {
@@ -131,131 +144,115 @@ curl -N 'http://localhost:3001/v1/chat/completions?ttft_ms=300&chunk_delay_ms=50
 }
 ```
 
-## 在 new-api 添加 mock 渠道
+## Gateway Integration
 
-在 new-api 后台添加渠道：
+For an OpenAI-compatible gateway, configure a provider/channel/upstream like this:
 
-| 配置项 | 值 |
+| Field | Value |
 | --- | --- |
-| 类型 | `OpenAI` |
-| Base URL | `http://mock-provider:3001/v1` 或 `http://localhost:3001/v1` |
-| API Key | `mock-key` |
-| 模型 | `mock-gpt` |
+| Provider type | `OpenAI-compatible` or `OpenAI` |
+| Base URL | `http://mock-provider:3001/v1` or `http://localhost:3001/v1` |
+| API key | `dummy-key` |
+| Model | `mock-gpt` |
 
-如果 new-api 与 mock-provider 在同一个 docker compose 网络中，使用：
+If the gateway and mock provider run in the same docker compose network:
 
 ```text
 http://mock-provider:3001/v1
 ```
 
-如果 new-api 跑在宿主机，使用：
+If the gateway runs on the host:
 
 ```text
 http://localhost:3001/v1
 ```
 
-## k6 脚本
+## k6 Scripts
 
-所有脚本都支持：
+All scripts support:
 
-| 环境变量 | 默认值 | 说明 |
+| Environment variable | Default | Description |
 | --- | --- | --- |
-| `BASE_URL` | `http://localhost:3001` | 压测目标地址；压 new-api 时改为 new-api 地址 |
-| `API_KEY` | `mock-key` | Bearer token |
-| `MODEL` | `mock-gpt` | 请求模型名 |
-| `QUERY` | 脚本内默认值 | 追加到 `/v1/chat/completions` 的 query string |
+| `BASE_URL` | `http://localhost:3001` | Target gateway or mock provider URL |
+| `API_KEY` | `dummy-key` | Placeholder bearer token |
+| `MODEL` | `mock-gpt` | Model name |
+| `QUERY` | Script-specific default | Query string appended to `/v1/chat/completions` |
 
-### Smoke Test
-
-验证链路是否通，1 个虚拟用户，持续 30 秒。
+Smoke test:
 
 ```bash
 k6 run k6/smoke.js
 ```
 
-经由 new-api：
+Run through a gateway:
 
 ```bash
-BASE_URL=http://localhost:3000 API_KEY=你的-new-api-key MODEL=mock-gpt k6 run k6/smoke.js
+BASE_URL=http://localhost:3000 API_KEY=dummy-key MODEL=mock-gpt k6 run k6/smoke.js
 ```
 
-### 非流式压测
+Non-streaming load test:
 
 ```bash
 k6 run k6/chat-non-stream.js
 ```
 
-模拟上游延迟：
+Simulate upstream latency:
 
 ```bash
 QUERY='?delay_ms=1000' k6 run k6/chat-non-stream.js
 ```
 
-### 流式压测
-
-默认使用：
-
-```text
-?ttft_ms=300&chunk_delay_ms=50&completion_tokens=200
-```
-
-运行：
+Streaming test:
 
 ```bash
 k6 run k6/chat-stream.js
 ```
 
-### 阶梯压测
-
-`stress.js` 阶梯：
+The default streaming query is:
 
 ```text
-10 VUs -> 50 VUs -> 100 VUs -> 200 VUs -> 500 VUs -> 1000 VUs
+?ttft_ms=300&chunk_delay_ms=50&completion_tokens=200
 ```
 
-每档 2 分钟。
+Stress test:
 
 ```bash
 k6 run k6/stress.js
 ```
 
-### 长稳压测
-
-100 VUs，持续 1 小时。
+Soak test:
 
 ```bash
 k6 run k6/soak.js
 ```
 
-## 推荐压测流程
+## Suggested Test Flow
 
-1. Smoke Test
+1. Smoke test
 
-目标：验证链路是否通。
+Goal: verify basic connectivity.
 
-并发：1
-持续：30 秒
+Suggested load: 1 VU for 30 seconds.
 
-2. Load Test
+2. Load test
 
-目标：验证正常负载能力。
+Goal: understand normal gateway capacity.
 
-并发：50 / 100 / 200
-持续：10-20 分钟
+Suggested load: 50 / 100 / 200 VUs for 10-20 minutes.
 
-3. Stress Test
+3. Stress test
 
-目标：找到系统瓶颈。
+Goal: find gateway bottlenecks.
 
-并发：100 / 200 / 500 / 1000
+Suggested load: 100 / 200 / 500 / 1000 VUs.
 
-4. Streaming Test
+4. Streaming test
 
-目标：验证 SSE 长连接能力。
+Goal: validate SSE long-lived connections and buffering behavior.
 
-并发连接：100 / 500 / 1000 / 3000
+Suggested load: 100 / 500 / 1000 / 3000 concurrent connections.
 
-建议 mock 参数：
+Suggested mock parameters:
 
 ```text
 ttft_ms=300
@@ -263,11 +260,11 @@ chunk_delay_ms=50
 completion_tokens=200
 ```
 
-5. Fault Injection
+5. Fault injection
 
-目标：验证异常处理、重试、计费、日志和熔断策略。
+Goal: validate retry behavior, billing correctness, logs, error handling, and circuit breaking.
 
-建议参数：
+Suggested mock parameters:
 
 ```text
 error_rate=0.01&error_status=429
@@ -275,112 +272,71 @@ error_rate=0.02&error_status=500
 timeout_rate=0.01&timeout_ms=30000
 ```
 
-6. Soak Test
+6. Soak test
 
-目标：长稳测试。
+Goal: validate long-running stability.
 
-并发：目标生产并发的 50%-70%
-持续：1-6 小时
+Suggested load: 50%-70% of expected production concurrency for 1-6 hours.
 
-## 压测时必须观察的指标
+## Metrics to Watch
 
-new-api：
+Gateway:
 
 - QPS
-- P50 / P95 / P99
-- 错误率
+- P50 / P95 / P99 latency
+- Error rate
 - HTTP 429 / 500 / 502 / 504
-- SSE 连接数
-- 请求日志写入耗时
-- 额度扣减是否正确
-- 失败请求是否重复扣费
+- Active SSE connections
+- Request log write latency
+- Quota or billing deduction correctness
+- Whether failed requests are billed repeatedly
+- Retry amplification
 
-系统：
+System:
 
 - CPU
-- 内存
-- goroutine / thread 数
-- 文件描述符 fd
-- 网络连接数
-- MySQL 连接池
-- Redis 连接池
-- 慢 SQL
-- 日志表增长
+- Memory
+- Goroutine / thread count
+- File descriptors
+- Network connections
+- Database connection pool
+- Cache connection pool
+- Slow queries
+- Log table or log sink growth
 
-性能分析：
+Profiling:
 
-- pprof CPU profile
-- pprof heap profile
-- pprof goroutine profile
-- Pyroscope 火焰图
-- mutex / block profile
+- CPU profile
+- Heap profile
+- Goroutine profile
+- Flame graphs
+- Mutex / block profile
 
-## new-api 性能分析配置
+## Roadmap
 
-new-api 支持 pprof 和 Pyroscope：
+- Long-lived connection profiles for streaming tests, including configurable idle periods and heartbeat chunks
+- More SSE patterns, such as role-only chunks, empty deltas, tool-call chunks, abrupt disconnects, and malformed frames
+- Richer error scenarios: 401, 403, 408, 409, 429, 500, 502, 503, 504, and provider-specific error bodies
+- Retry-oriented scenarios, including partial failures, slow-first-attempt then success, and deterministic failure sequences
+- Request-size controls for large prompts, long message histories, and large tool/function call payloads
+- Token accounting modes for validating gateway quota and billing behavior
+- Per-route controls for embeddings, chat, model listing, and future OpenAI-compatible endpoints
+- Metrics endpoint for mock-provider-side request counts, latency buckets, active streams, and injected failures
+- Config-file based scenarios in addition to query-string controls
+- Optional response templates for custom provider shapes while keeping OpenAI-compatible defaults
 
-- pprof 用于临时诊断和离线分析。
-- Pyroscope 用于持续 profiling 和火焰图可视化。
+## Acceptance Checklist
 
-docker compose 部署 new-api 时建议增加：
-
-```yaml
-environment:
-  - ENABLE_PPROF=true
-  - PYROSCOPE_URL=http://pyroscope:4040
-  - PYROSCOPE_APP_NAME=new-api
-  - PYROSCOPE_MUTEX_RATE=5
-  - PYROSCOPE_BLOCK_RATE=5
-  - HOSTNAME=new-api-local
-```
-
-说明：
-
-| 变量 | 说明 |
-| --- | --- |
-| `ENABLE_PPROF=true` | 启用 `/debug/pprof/` |
-| `PYROSCOPE_URL` | 配置 Pyroscope 地址 |
-| `PYROSCOPE_APP_NAME` | 区分应用 |
-| `HOSTNAME` | 区分不同实例 |
-
-本工程提供了可选 Pyroscope 服务：
-
-```bash
-docker compose --profile profiling up pyroscope
-```
-
-也可以将以下服务片段加入你的 new-api compose：
-
-```yaml
-pyroscope:
-  image: grafana/pyroscope:latest
-  ports:
-    - "4040:4040"
-```
-
-pprof 常用命令示例：
-
-```bash
-go tool pprof http://localhost:3000/debug/pprof/profile?seconds=30
-go tool pprof http://localhost:3000/debug/pprof/heap
-curl -s http://localhost:3000/debug/pprof/goroutine?debug=2
-```
-
-## 验收清单
-
-- `docker compose up` 可以启动 mock-provider
-- `GET /healthz` 返回 200
-- `GET /v1/models` 返回 `mock-gpt`
-- `POST /v1/chat/completions stream=false` 可用
-- `POST /v1/chat/completions stream=true` 可用
-- `delay_ms` 生效
-- `ttft_ms` 生效
-- `chunk_delay_ms` 生效
-- `error_rate` 生效
-- `timeout_rate` 生效
-- `k6/smoke.js` 可运行
-- `k6/chat-non-stream.js` 可运行
-- `k6/chat-stream.js` 可运行
-- README 说明 new-api 接入方式
-- README 说明 pprof / Pyroscope 配置方式
-- README 说明完整压测流程
+- `docker compose up` starts the mock provider
+- `GET /healthz` returns 200
+- `GET /v1/models` returns `mock-gpt`
+- `POST /v1/chat/completions` works with `stream=false`
+- `POST /v1/chat/completions` works with `stream=true`
+- `delay_ms` works
+- `ttft_ms` works
+- `chunk_delay_ms` works
+- `error_rate` works
+- `timeout_rate` works
+- k6 smoke script runs
+- k6 non-streaming script runs
+- k6 streaming script runs

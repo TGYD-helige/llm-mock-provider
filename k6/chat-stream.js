@@ -14,7 +14,7 @@ export const options = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3001';
-const API_KEY = __ENV.API_KEY || 'mock-key';
+const API_KEY = __ENV.API_KEY || 'dummy-key';
 const MODEL = __ENV.MODEL || 'mock-gpt';
 const QUERY = __ENV.QUERY || '?ttft_ms=300&chunk_delay_ms=50&completion_tokens=200';
 

@@ -1,6 +1,6 @@
 # mock-provider
 
-这是一个只使用 Go 标准库 `net/http` 实现的 OpenAI-compatible mock provider，用于在不调用真实大模型的情况下给 new-api 做网关压测。
+这是一个只使用 Go 标准库 `net/http` 实现的 OpenAI-compatible mock provider，用于在不调用真实大模型的情况下测试任意大模型网关、API 路由、计费层、重试逻辑和流式连接能力。
 
 默认监听端口：`3001`
 
