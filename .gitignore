@@ -2,4 +2,5 @@
 bin/
 dist/
 coverage/
+reports/
 *.log
