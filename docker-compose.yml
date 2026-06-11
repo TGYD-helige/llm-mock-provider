@@ -1,0 +1,22 @@
+services:
+  mock-provider:
+    build:
+      context: ./mock-provider
+    container_name: mock-provider
+    environment:
+      PORT: "3001"
+      DEFAULT_MODEL: mock-gpt
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  pyroscope:
+    image: grafana/pyroscope:latest
+    profiles:
+      - profiling
+    ports:
+      - "4040:4040"
