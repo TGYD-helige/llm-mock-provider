@@ -18,6 +18,10 @@ const (
 	defaultModel = "mock-gpt"
 )
 
+type contextKey string
+
+const scenarioContextKey contextKey = "scenario"
+
 type server struct {
 	model string
 }
@@ -72,11 +76,41 @@ func main() {
 	mux.HandleFunc("/v1/models", s.withCORS(s.handleModels))
 	mux.HandleFunc("/v1/chat/completions", s.withCORS(s.handleChatCompletions))
 	mux.HandleFunc("/v1/embeddings", s.withCORS(s.handleEmbeddings))
+	mux.HandleFunc("/scenario/", s.withCORS(s.handleScenario))
 
 	addr := ":" + strings.TrimPrefix(port, ":")
 	log.Printf("mock provider listening on %s, default model=%s", addr, s.model)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func (s *server) handleScenario(w http.ResponseWriter, r *http.Request) {
+	scenario, strippedPath, ok := parseScenarioPath(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown scenario route")
+		return
+	}
+	scenario, ok = normalizeScenario(scenario)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown scenario")
+		return
+	}
+
+	w.Header().Set("X-Mock-Scenario", scenario)
+
+	scenarioRequest := r.Clone(context.WithValue(r.Context(), scenarioContextKey, scenario))
+	scenarioRequest.URL.Path = strippedPath
+
+	switch strippedPath {
+	case "/v1/models":
+		s.handleModels(w, scenarioRequest)
+	case "/v1/chat/completions":
+		s.handleChatCompletions(w, scenarioRequest)
+	case "/v1/embeddings":
+		s.handleEmbeddings(w, scenarioRequest)
+	default:
+		writeError(w, http.StatusNotFound, "unknown scenario route")
 	}
 }
 
@@ -278,7 +312,7 @@ func parseChatConfig(r *http.Request) chatConfig {
 		completionTokens = 0
 	}
 
-	return chatConfig{
+	cfg := chatConfig{
 		DelayMS:          nonNegativeInt(q.Get("delay_ms"), 0),
 		TTFTMS:           nonNegativeInt(q.Get("ttft_ms"), 0),
 		ChunkDelayMS:     nonNegativeInt(q.Get("chunk_delay_ms"), 0),
@@ -290,6 +324,69 @@ func parseChatConfig(r *http.Request) chatConfig {
 			TimeoutRate: rateParam(q.Get("timeout_rate"), 0),
 			TimeoutMS:   nonNegativeInt(q.Get("timeout_ms"), 30000),
 		},
+	}
+
+	applyScenario(&cfg, scenarioFromContext(r.Context()))
+	return cfg
+}
+
+func parseScenarioPath(path string) (string, string, bool) {
+	const prefix = "/scenario/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", "", false
+	}
+
+	rest := strings.TrimPrefix(path, prefix)
+	scenario, strippedPath, ok := strings.Cut(rest, "/")
+	if !ok || scenario == "" || strippedPath == "" {
+		return "", "", false
+	}
+
+	strippedPath = "/" + strippedPath
+	if !strings.HasPrefix(strippedPath, "/v1/") {
+		return "", "", false
+	}
+
+	return scenario, strippedPath, true
+}
+
+func scenarioFromContext(ctx context.Context) string {
+	scenario, _ := ctx.Value(scenarioContextKey).(string)
+	return scenario
+}
+
+func normalizeScenario(scenario string) (string, bool) {
+	scenario = strings.ToLower(strings.TrimSpace(scenario))
+	switch scenario {
+	case "healthy", "flaky-500", "flaky-429", "timeout", "slow-ttft", "always-500", "always-429":
+		return scenario, true
+	default:
+		return "", false
+	}
+}
+
+func applyScenario(cfg *chatConfig, scenario string) {
+	switch scenario {
+	case "", "healthy":
+		return
+	case "flaky-500":
+		cfg.Fault.ErrorRate = 0.20
+		cfg.Fault.ErrorStatus = http.StatusInternalServerError
+	case "flaky-429":
+		cfg.Fault.ErrorRate = 0.20
+		cfg.Fault.ErrorStatus = http.StatusTooManyRequests
+	case "timeout":
+		cfg.Fault.TimeoutRate = 0.05
+		cfg.Fault.TimeoutMS = 30000
+	case "slow-ttft":
+		cfg.TTFTMS = 2000
+		cfg.DelayMS = 2000
+	case "always-500":
+		cfg.Fault.ErrorRate = 1
+		cfg.Fault.ErrorStatus = http.StatusInternalServerError
+	case "always-429":
+		cfg.Fault.ErrorRate = 1
+		cfg.Fault.ErrorStatus = http.StatusTooManyRequests
 	}
 }
 
