@@ -24,6 +24,7 @@ The examples use placeholder values such as `dummy-key`, `localhost`, and `mock-
 - OpenAI-compatible embeddings endpoint
 - Non-streaming and SSE streaming responses
 - Configurable latency, TTFT, chunk delay, token counts, error rates, and timeout simulation
+- Channel-style scenario paths for testing gateway failover with one mock-provider deployment
 - k6 scripts for smoke, load, streaming, stress, and soak tests
 - Docker and docker compose support
 - No OpenAI SDK dependency
@@ -52,6 +53,22 @@ llm-mock-provider/
 ```
 
 Kubernetes manifests are intentionally not included here because deployment topology is gateway-specific. Keep cluster credentials and production values in a private infrastructure repository.
+
+## Image Publishing
+
+The included GitHub Actions workflow tests and builds pull requests. After a change is merged into `main`, it publishes `linux/amd64` images tagged with both `latest` and the commit SHA.
+
+Configure these GitHub repository variables:
+
+- `CONTAINER_REGISTRY`
+- `CONTAINER_NAMESPACE`
+- `CONTAINER_USERNAME`
+
+Configure this GitHub repository secret:
+
+- `CONTAINER_PASSWORD`
+
+Registry credentials must remain in GitHub Secrets and must not be committed to this public repository.
 
 ## Quick Start
 
@@ -110,6 +127,30 @@ curl --no-buffer --request POST \
 
 Returns a fixed OpenAI-compatible embedding response. It does not call a real model.
 
+### Scenario Paths
+
+Use scenario paths when you want multiple gateway channels to point at the same mock-provider deployment but behave differently:
+
+```text
+/scenario/{scenario}/v1/models
+/scenario/{scenario}/v1/chat/completions
+/scenario/{scenario}/v1/embeddings
+```
+
+Built-in scenarios:
+
+| Scenario | Behavior |
+| --- | --- |
+| `healthy` | No additional injected fault |
+| `flaky-500` | 20% of requests return 500 |
+| `flaky-429` | 20% of requests return 429 |
+| `timeout` | 5% of requests wait 30s, then return 504 |
+| `slow-ttft` | Streaming TTFT is forced to 2000ms; non-streaming delay is forced to 2000ms |
+| `always-500` | 100% of requests return 500, useful for smoke/debug |
+| `always-429` | 100% of requests return 429, useful for smoke/debug |
+
+Scenarios are applied after query-string controls are parsed. That makes the path authoritative for channel-level behavior. For example, `/scenario/always-429/v1/chat/completions?error_rate=0` still returns 429.
+
 ## Mock Controls
 
 Control behavior with query parameters:
@@ -157,6 +198,16 @@ For an OpenAI-compatible gateway, configure a provider/channel/upstream like thi
 | Base URL | `http://mock-provider:3001/v1` or `http://localhost:3001/v1` |
 | API key | `dummy-key` |
 | Model | `mock-gpt` |
+
+To test channel failover, configure several gateway channels that point to the same mock-provider service with different scenario paths:
+
+| Gateway channel | Base URL |
+| --- | --- |
+| healthy | `http://mock-provider:3001/scenario/healthy/v1` |
+| flaky 500 | `http://mock-provider:3001/scenario/flaky-500/v1` |
+| flaky 429 | `http://mock-provider:3001/scenario/flaky-429/v1` |
+| timeout | `http://mock-provider:3001/scenario/timeout/v1` |
+| slow TTFT | `http://mock-provider:3001/scenario/slow-ttft/v1` |
 
 If the gateway and mock provider run in the same docker compose network:
 
