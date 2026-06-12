@@ -44,6 +44,9 @@ llm-mock-provider/
 │   ├── chat-stream.js
 │   ├── stress.js
 │   └── soak.js
+├── tools/
+│   ├── load-probe/
+│   └── stream-probe/
 ├── docker-compose.yml
 └── README.md
 ```
@@ -213,6 +216,17 @@ The default streaming query is:
 ```text
 ?ttft_ms=300&chunk_delay_ms=50&completion_tokens=200
 ```
+
+The k6 streaming script validates completed streams and measures full response duration. For true time-to-first-token measurement, use the incremental SSE stream probe:
+
+```bash
+API_KEY=your-key go run ./tools/stream-probe/main.go \
+  -url 'http://localhost:3001/v1/chat/completions?ttft_ms=300&chunk_delay_ms=50&completion_tokens=200' \
+  -concurrency 20 \
+  -duration 2m
+```
+
+It reports HTTP response-header latency, time to the first SSE `data:` chunk, and complete stream duration separately.
 
 Stress test:
 
